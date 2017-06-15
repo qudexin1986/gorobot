@@ -222,7 +222,10 @@ func (self *wxweb) login(args ...interface{}) bool {
 	ur := new(url.URL)
 	urlJ, _ := ur.Parse(self.redirect_uri)
 	cookies := self.http_client.Jar.Cookies(urlJ)
-	fmt.Println(cookies)
+	for _, v := range cookies {
+		fmt.Println(v.Expires)
+	}
+
 	f, fe := os.OpenFile("loginCookie", os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0777)
 	if fe != nil {
 		panic(fe)
@@ -586,7 +589,7 @@ func (self *wxweb) run() {
 
 func (self *wxweb) start() {
 	fmt.Println("[*] 微信网页版 ... 开动")
-	f, fe := os.OpenFile("idlogin", os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0777)
+	f, fe := os.OpenFile("idlogin", os.O_CREATE|os.O_RDWR, 0777)
 	if fe != nil {
 		panic(fe)
 	}
@@ -601,12 +604,30 @@ func (self *wxweb) start() {
 		self.base_uri = v["base_uri"].(string)
 		self.redirect_uri = v["redirect_uri"].(string)
 		gCookieJar, _ := cookiejar.New(nil)
-
 		cookie_str, _ := ioutil.ReadFile("loginCookie")
-		httpCookie := JsonDecode(string(cookie_str)).([]*http.Cookie)
+		httpCookieStr := JsonDecode(string(cookie_str)).([]interface{})
+		httpCookie := make([]*http.Cookie, 0)
 		// gCookieJar.SetCookies()
+		for _, va := range httpCookieStr {
+			cookie := new(http.Cookie)
+			v := va.(map[string]interface{})
+			cookie.Domain = v["Domain"].(string)
+			cookie.Name = v["Name"].(string)
+			cookie.Path = v["Path"].(string)
+			// cookie.Expires, _ = time.Parse("0001-00-00 00:00:00", v["Expires"].(string))
+			cookie.HttpOnly = false
+			cookie.MaxAge = 0
+			cookie.RawExpires = ""
+			cookie.Raw = ""
+			cookie.Unparsed = nil
+			cookie.Secure = false
+			cookie.Value = v["Value"].(string)
+			httpCookie = append(httpCookie, cookie)
+		}
 		up, _ := url.Parse(self.redirect_uri)
 		gCookieJar.SetCookies(up, httpCookie)
+		cis := gCookieJar.Cookies(up)
+		fmt.Println(cis)
 		httpclient := http.Client{
 			CheckRedirect: nil,
 			Jar:           gCookieJar,
@@ -647,7 +668,8 @@ func (self *wxweb) start() {
 	userList["user"] = self
 	user_J := JsonEncode(user)
 	fmt.Println(user_J)
-	f.Write([]byte(user_J))
+	ioutil.WriteFile("idlogin", []byte(user_J), os.ModeAppend)
+	// f.Write([]byte(user_J))
 	// self._run("[*] 进行同步线路测试 ... ", self.webwxgetcontact)
 
 	serverConfig, err := getConfig("server")
