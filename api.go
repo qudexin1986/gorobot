@@ -57,8 +57,10 @@ func randomLoveWord() string {
 }
 
 func (this *ApiServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	this.ApiName = r.URL.Path
+	fmt.Println(this.ApiName)
 	switch this.ApiName {
-	case "message":
+	case "/message":
 		msg := r.PostFormValue("msg")
 		uid := r.PostFormValue("uid")
 		robotName := r.PostFormValue("robot")
@@ -75,6 +77,9 @@ func (this *ApiServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			fmt.Fprint(w, reply)
 		}
+	case "/message/getList":
+		ret := userList["user"].Webwxgetcontact()
+		w.Write([]byte(ret))
 	default:
 		fmt.Fprint(w, "Invalid api")
 	}

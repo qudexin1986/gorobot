@@ -28,17 +28,4 @@ func main() {
 	wx := wxweb{}
 	wx.start()
 
-	// http.Handle("/message", &ApiServer{ApiName: "message"})
-	//
-	// serverConfig, err := getConfig("server")
-	// if err != nil {
-	// 	log.Fatal("server config error:", err)
-	// }
-	//
-	// fmt.Println("listen on port " + serverConfig["port"])
-	//
-	// if err = http.ListenAndServe(":"+serverConfig["port"], nil); err != nil {
-	// 	log.Fatal("ListenAndServe:", err)
-	// }
-
 }

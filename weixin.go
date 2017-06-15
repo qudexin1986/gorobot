@@ -3,6 +3,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/cookiejar"
 	// "log"
@@ -21,7 +22,10 @@ import (
 	"strings"
 	"time"
 	// "strings"
+	"reflect"
 )
+
+var userList map[string]*wxweb = make(map[string]*wxweb)
 
 const debug = false
 
@@ -32,6 +36,11 @@ func debugPrint(content interface{}) {
 }
 
 type wxweb struct {
+	wxwebData
+	http_client *http.Client
+}
+
+type wxwebData struct {
 	uuid         string
 	base_uri     string
 	redirect_uri string
@@ -45,10 +54,10 @@ type wxweb struct {
 	User         map[string]interface{}
 	BaseRequest  map[string]interface{}
 	syncHost     string
-	http_client  *http.Client
 }
 
 func (self *wxweb) getUuid(args ...interface{}) bool {
+
 	urlstr := "https://login.weixin.qq.com/jslogin"
 	urlstr += "?appid=wx782c26e4c19acffb&fun=new&lang=zh_CN&_=" + self._unixStr()
 	data, _ := self._get(urlstr, false)
@@ -56,6 +65,7 @@ func (self *wxweb) getUuid(args ...interface{}) bool {
 	find := re.FindStringSubmatch(data)
 	if len(find) > 1 {
 		self.uuid = find[1]
+
 		return true
 	} else {
 		return false
@@ -209,6 +219,16 @@ func (self *wxweb) waitForLogin(tip int) bool {
 
 func (self *wxweb) login(args ...interface{}) bool {
 	data, _ := self._get(self.redirect_uri, false)
+	ur := new(url.URL)
+	urlJ, _ := ur.Parse(self.redirect_uri)
+	cookies := self.http_client.Jar.Cookies(urlJ)
+	fmt.Println(cookies)
+	f, fe := os.OpenFile("loginCookie", os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0777)
+	if fe != nil {
+		panic(fe)
+	}
+	defer f.Close()
+	f.WriteString(JsonEncode(cookies))
 	type Result struct {
 		Skey        string `xml:"skey"`
 		Wxsid       string `xml:"wxsid"`
@@ -415,7 +435,7 @@ func (self *wxweb) webwxsync() interface{} {
 	params["SyncKey"] = self.SyncKey
 	params["rr"] = ^int(time.Now().Unix())
 	res, err := self._post(urlstr, params, true)
-	if err != nil{
+	if err != nil {
 		return false
 	}
 	data := JsonDecode(res).(map[string]interface{})
@@ -433,6 +453,7 @@ func (self *wxweb) handleMsg(r interface{}) {
 		// fmt.Println("[*] 你有新的消息，请注意查收")
 		// msg = msg.(map[string]interface{})
 		msgType := msg.(map[string]interface{})["MsgType"].(int)
+		fmt.Println("msg##", msg.(map[string]interface{}))
 		fromUserName := msg.(map[string]interface{})["FromUserName"].(string)
 		// name = self.getUserRemarkName(msg['FromUserName'])
 		content := msg.(map[string]interface{})["Content"].(string)
@@ -470,7 +491,9 @@ func (self *wxweb) handleMsg(r interface{}) {
 					ans, err = self.getReplyByApi(LOVEWORDS_QUEST, fromUserName)
 				}
 			} else {
+
 				ans, err = self.getReplyByApi(content, fromUserName)
+				fmt.Println("ans###", ans)
 			}
 			debugPrint(ans)
 			debugPrint(content)
@@ -512,7 +535,21 @@ func (self *wxweb) webwxsendmsg(message string, toUseNname string) bool {
 	}
 }
 
+func (self *wxweb) Webwxgetcontact() string {
+	t := time.Now().Unix()
+	urlstr := fmt.Sprintf("%s/webwxgetcontact?r=%d&seq=%s&skey=%s", self.base_uri, t, "0", self.skey)
+	ret, _ := self._get(urlstr, false)
+	// fmt.Println(ret)
+	return ret
+}
+
 func (self *wxweb) _init() {
+	defer func() {
+		e := recover()
+		if e != nil {
+			panic(e)
+		}
+	}()
 	gCookieJar, _ := cookiejar.New(nil)
 	httpclient := http.Client{
 		CheckRedirect: nil,
@@ -521,15 +558,11 @@ func (self *wxweb) _init() {
 	self.http_client = &httpclient
 	rand.Seed(time.Now().Unix())
 	str := strconv.Itoa(rand.Int())
+	fmt.Println(str[2:17])
 	self.deviceId = "e" + str[2:17]
 }
 
-func (self *wxweb) test() {
-
-}
-
-func (self *wxweb) start() {
-	fmt.Println("[*] 微信网页版 ... 开动")
+func (self *wxweb) run() {
 	self._init()
 	self._run("[*] 正在获取 uuid ... ", self.getUuid)
 	self._run("[*] 正在获取 二维码 ... ", self.genQRcode)
@@ -544,10 +577,91 @@ func (self *wxweb) start() {
 		}
 		break
 	}
+
 	self._run("[*] 正在登录 ... ", self.login)
 	self._run("[*] 微信初始化 ... ", self.webwxinit)
 	self._run("[*] 开启状态通知 ... ", self.webwxstatusnotify)
 	self._run("[*] 进行同步线路测试 ... ", self.testsynccheck)
+}
+
+func (self *wxweb) start() {
+	fmt.Println("[*] 微信网页版 ... 开动")
+	f, fe := os.OpenFile("idlogin", os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0777)
+	if fe != nil {
+		panic(fe)
+	}
+	defer f.Close()
+	b, _ := ioutil.ReadAll(f)
+	if len(b) > 0 {
+		v := JsonDecode(string(b)).(map[string]interface{})
+		self = new(wxweb)
+		self.BaseRequest = v["BaseRequest"].(map[string]interface{})
+		self.deviceId = v["deviceId"].(string)
+		self.uuid = v["uuid"].(string)
+		self.base_uri = v["base_uri"].(string)
+		self.redirect_uri = v["redirect_uri"].(string)
+		gCookieJar, _ := cookiejar.New(nil)
+
+		cookie_str, _ := ioutil.ReadFile("loginCookie")
+		httpCookie := JsonDecode(string(cookie_str)).([]*http.Cookie)
+		// gCookieJar.SetCookies()
+		up, _ := url.Parse(self.redirect_uri)
+		gCookieJar.SetCookies(up, httpCookie)
+		httpclient := http.Client{
+			CheckRedirect: nil,
+			Jar:           gCookieJar,
+		}
+		self.http_client = &httpclient
+		self.pass_ticket = v["pass_ticket"].(string)
+
+		self.sid = v["sid"].(string)
+		self.skey = v["skey"].(string)
+		self.syncHost = v["syncHost"].(string)
+		self.uin = v["uin"].(string)
+		self.User = v["User"].(map[string]interface{})
+		self.SyncKey = v["SyncKey"].(map[string]interface{})
+
+		// self.wxwebData = v
+		if self.testsynccheck() {
+
+		} else {
+			self.run()
+		}
+	} else {
+		self.run()
+	}
+	fmt.Println(self.wxwebData)
+	twx := reflect.TypeOf(&self.wxwebData).Elem()
+	l := twx.NumField()
+	tval := reflect.ValueOf(&self.wxwebData).Elem()
+	var i = 0
+	var user = make(map[string]interface{})
+	for i = 0; i < l; i++ {
+		switch tval.FieldByName(twx.Field(i).Name).Kind() {
+		case reflect.Map:
+			user[twx.Field(i).Name] = tval.FieldByName(twx.Field(i).Name).Interface().(map[string]interface{})
+		default:
+			user[twx.Field(i).Name] = tval.FieldByName(twx.Field(i).Name).String()
+		}
+	}
+	userList["user"] = self
+	user_J := JsonEncode(user)
+	fmt.Println(user_J)
+	f.Write([]byte(user_J))
+	// self._run("[*] 进行同步线路测试 ... ", self.webwxgetcontact)
+
+	serverConfig, err := getConfig("server")
+	if err != nil {
+		log.Fatal("server config error:", err)
+	}
+	//
+	fmt.Println("listen on port " + serverConfig["port"])
+	go func() {
+		if err = http.ListenAndServe(":"+serverConfig["port"], &ApiServer{}); err != nil {
+			log.Fatal("ListenAndServe:", err)
+		}
+	}()
+	fmt.Println("server start")
 	for {
 		retcode, selector := self.synccheck()
 		if retcode == "1100" {
@@ -573,7 +687,6 @@ func (self *wxweb) start() {
 			}
 		}
 	}
-
 }
 
 func forgeheadget(urlstr string) string {
@@ -586,7 +699,6 @@ func forgeheadget(urlstr string) string {
 		fmt.Println("Fatal error ", err.Error())
 		os.Exit(0)
 	}
-
 	reqest.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
 	reqest.Header.Add("Accept-Encoding", "gzip, deflate, sdch")
 	reqest.Header.Add("Accept-Language", "zh-CN,zh;q=0.8")
